@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+models/
+node_modules/
+dist/
+
+recordings/
+hls/

@@ -1,0 +1,6 @@
+# GPU worker extras. Install AFTER requirements.txt, with the PyTorch wheel index that matches the
+# NVIDIA driver's supported CUDA version, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# Verify with: python scripts/test_gpu.py   (driver >= the CUDA runtime bundled with the torch wheel)
+ultralytics>=8.3,<9
+nvidia-ml-py>=12

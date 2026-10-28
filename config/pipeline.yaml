@@ -1,0 +1,60 @@
+# Worker pipeline configuration (see backend/app/core/config.py for all fields/defaults)
+worker:
+  max_streams: 16          # initial target, NOT a guaranteed capacity: benchmark on your hardware
+  heartbeat_interval_s: 3
+  metrics_interval_s: 10
+decode:
+  width: 1280
+  height: 720
+  aspect: letterbox        # stretch | letterbox | crop
+  hwaccel: auto            # auto | cuda | none   (auto => NVDEC only if FFmpeg build lists cuda)
+  allow_cpu_fallback: true
+  rtsp_transport: tcp      # tcp | udp
+  read_timeout_s: 10
+  reconnect_initial_s: 1
+  reconnect_max_s: 30
+router:
+  queue_size: 4
+  default_fps: 5
+  stale_ms: 2000
+inference:
+  batch_size: 8
+  batch_timeout_ms: 25
+  gpu_mem_limit_fraction: 0.9
+overlay:
+  enabled: true
+  draw_labels: true
+  draw_timestamp: true
+  draw_confidence: true
+  detection_hold_ms: 1500
+  class_colors:            # BGR
+    person: [0, 255, 0]
+    bicycle: [0, 255, 255]
+    car: [255, 128, 0]
+    motorcycle: [255, 255, 0]
+    bus: [255, 0, 255]
+    truck: [255, 0, 128]
+    traffic light: [0, 200, 255]
+    stop sign: [0, 0, 255]
+    backpack: [128, 0, 255]
+    handbag: [180, 105, 255]
+    suitcase: [0, 128, 255]
+    bottle: [200, 200, 0]
+    chair: [128, 128, 0]
+    laptop: [255, 200, 100]
+    cell phone: [100, 255, 200]
+    dog: [0, 165, 255]
+    cat: [147, 20, 255]
+    bird: [50, 205, 154]
+    horse: [42, 42, 165]
+encoder:
+  codec: h264              # h264 | h265
+  encoder: auto            # auto | nvenc | software
+  allow_software_fallback: true
+  width: 1280
+  height: 720
+  fps: 15
+  bitrate_kbps: 2500
+  gop: 30
+  preset: veryfast
+  nvenc_preset: p3

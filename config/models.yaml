@@ -1,0 +1,42 @@
+# Model registry + camera inference profiles.
+# Nothing is downloaded automatically. Mount weights into the worker container (see README).
+models:
+  yolo_general:
+    kind: detection
+    backend: ultralytics
+    weights: /models/yolo_general.pt
+    version: "custom-1.0"
+    options: {conf: 0.25, iou: 0.45, imgsz: 640, half: true}
+  # --- development models (explicit mock backend; NOT real inference)
+  mock_blob:
+    kind: detection
+    backend: mock
+    version: "mock-1"
+    options: {class_name: blob, threshold: 200}
+  mock_ocr: {kind: ocr, backend: mock, version: mock-1}
+  mock_reid: {kind: reid, backend: mock, version: mock-1}
+  mock_dino: {kind: dino, backend: mock, version: mock-1}
+  mock_sam: {kind: segmentation, backend: mock, version: mock-1}
+  # --- real adapters to implement/register (see README "Adding a model adapter")
+  # ocr_plate: {kind: ocr, backend: easyocr, weights: /models/ocr}
+  # reid_osnet: {kind: reid, backend: torchreid, weights: /models/osnet.pt}
+  # dino_v2: {kind: dino, backend: hf_dino, weights: /models/dinov2}
+  # sam3: {kind: segmentation, backend: sam3, weights: /models/sam3.pt}
+
+profiles:
+  default:
+    detection: yolo_general
+    stages: [detect]
+    fps: 5
+  # profile used by synthetic/mock development stack (VMS_FORCE_MOCK_MODELS=true maps ALL models to mock)
+  mock_full:
+    detection: mock_blob
+    stages: [detect, ocr, reid, dino, sam]
+    ocr: mock_ocr
+    reid: mock_reid
+    dino: mock_dino
+    sam: mock_sam
+    ocr_classes: ["*"]
+    reid_classes: [blob]
+    sam_classes: [blob]
+    fps: 5

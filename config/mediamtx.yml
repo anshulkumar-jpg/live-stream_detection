@@ -1,0 +1,35 @@
+# MediaMTX gateway configuration (TEMPLATE: ${VARS} are rendered by scripts/render_mediamtx.py in the
+# `mediamtx-config` compose service; keep secrets in .env, never in this file).
+# Validated against MediaMTX v1.x config keys; re-check key names if you change the pinned image version.
+logLevel: info
+
+# --- authentication: delegated to the control plane (publish creds / viewer JWT / api creds)
+authMethod: http
+authHTTPAddress: http://api:8000/api/v1/streams/mediamtx-auth
+
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+
+# --- ingest from GPU workers (FFmpeg pushes RTSP over TCP)
+rtsp: yes
+protocols: [tcp]               # renamed rtspTransports in MediaMTX >= 1.10
+rtspAddress: :8554
+rtmp: no
+srt: no
+
+# --- WebRTC (low latency). ICE: set VMS_WEBRTC_ADDITIONAL_HOSTS to the address browsers can reach.
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: "${WEBRTC_ALLOW_ORIGIN}"
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcAdditionalHosts: [${WEBRTC_ADDITIONAL_HOSTS}]
+
+# --- HLS disabled: video is served directly over WebRTC only
+hls: no
+
+paths:
+  # one path per camera, created implicitly when a worker publishes to /<camera_id>
+  all_others:

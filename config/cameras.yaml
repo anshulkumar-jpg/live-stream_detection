@@ -1,0 +1,11 @@
+# Used only by `python -m app.workers.gpu_worker --standalone` (single-camera bring-up / Phase 2).
+# In the full system cameras are managed through the control plane API.
+cameras:
+  - camera_id: synthetic_001
+    source_url: "synthetic://?w=1280&h=720&fps=15"
+    model_profile: mock_full
+    stream_enabled: true
+    target_fps: 5
+  # - camera_id: camera_001
+  #   source_url: "${CAMERA_001_URL}"     # rtsp://user:pass@192.168.1.100:554/stream1 (env-expanded)
+  #   model_profile: default

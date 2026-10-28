@@ -1,0 +1,134 @@
+# VMS development stack.
+#   GPU system (default; needs NVIDIA driver + NVIDIA Container Toolkit):  docker compose up --build
+#   CPU-only development (synthetic input + mock models, NO GPU):          docker compose --profile dev up --build  (stop gpu-worker-0 first: it is not profile-gated)
+# Windows: Docker Desktop + WSL2 backend; GPU passthrough there needs a recent NVIDIA Windows driver with WSL support and
+# Docker Desktop's GPU support enabled. The `gpu` profile is written for Linux hosts and is NOT verified on Windows - use
+# `--profile dev` there unless you have validated GPU access (docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu24.04 nvidia-smi).
+name: vms
+
+x-backend-env: &backend-env
+  VMS_ENV: ${VMS_ENV:-dev}
+  VMS_LOG_LEVEL: ${VMS_LOG_LEVEL:-INFO}
+  VMS_DATABASE_URL: ${VMS_DATABASE_URL}
+  VMS_FERNET_KEY: ${VMS_FERNET_KEY:?set VMS_FERNET_KEY in .env}
+  VMS_JWT_SECRET: ${VMS_JWT_SECRET:?set VMS_JWT_SECRET in .env}
+  VMS_ADMIN_USERNAME: ${VMS_ADMIN_USERNAME:-admin}
+  VMS_ADMIN_PASSWORD: ${VMS_ADMIN_PASSWORD:?set VMS_ADMIN_PASSWORD in .env}
+  VMS_VIEWER_USERNAME: ${VMS_VIEWER_USERNAME:-viewer}
+  VMS_VIEWER_PASSWORD: ${VMS_VIEWER_PASSWORD:-}
+  VMS_BUS: kafka
+  VMS_KAFKA_BOOTSTRAP: kafka:9092
+  VMS_MEDIAMTX_HOST: mediamtx
+  VMS_MEDIAMTX_API_URL: http://mediamtx:9997
+  VMS_MEDIAMTX_PUBLISH_USER: ${MTX_PUBLISH_USER:-publisher}
+  VMS_MEDIAMTX_PUBLISH_PASS: ${MTX_PUBLISH_PASS:?set MTX_PUBLISH_PASS in .env}
+  VMS_MEDIAMTX_API_USER: ${MTX_API_USER:-api}
+  VMS_MEDIAMTX_API_PASS: ${MTX_API_PASS:?set MTX_API_PASS in .env}
+  VMS_PUBLIC_WEBRTC_BASE: ${VMS_PUBLIC_WEBRTC_BASE:-http://localhost:8889}
+  VMS_STREAM_POLICY: ${VMS_STREAM_POLICY:-always}
+  VMS_CAMERA_ALLOWED_CIDRS: ${VMS_CAMERA_ALLOWED_CIDRS:-[]}
+  VMS_ALLOW_SYNTHETIC_SOURCES: ${VMS_ALLOW_SYNTHETIC_SOURCES:-false}
+  VMS_CORS_ORIGINS: ${VMS_CORS_ORIGINS:-["http://localhost:5173"]}
+  VMS_PIPELINE_CONFIG: /app/config/pipeline.yaml
+  VMS_MODELS_CONFIG: /app/config/models.yaml
+
+services:
+  # ------------------------------------------------------------------ data plane infrastructure
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vms}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vms} -d ${POSTGRES_DB:-vms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]          # internal only: no published port
+
+  kafka:                         # KRaft single node (dev). Production: >=3 brokers, replication factor 3.
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"     # topics are created by the control plane with explicit retention/partitions
+      KAFKA_LOG_RETENTION_HOURS: 72
+    volumes: [kafkadata:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    networks: [backend]
+
+  config-render:                 # renders ${VAR} templates (secrets from .env) into a shared volume
+    image: python:3.12-slim-bookworm
+    environment:
+      MTX_API_USER: ${MTX_API_USER:-api}
+      MTX_API_PASS: ${MTX_API_PASS:?}
+      WEBRTC_ALLOW_ORIGIN: ${WEBRTC_ALLOW_ORIGIN:-*}
+      WEBRTC_ADDITIONAL_HOSTS: ${WEBRTC_ADDITIONAL_HOSTS:-127.0.0.1}
+    volumes:
+      - ./config:/in:ro
+      - ./scripts/render_config.py:/render_config.py:ro
+      - rendered:/out
+    command: ["sh", "-c", "python /render_config.py /in/mediamtx.yml /out/mediamtx.yml && python /render_config.py /in/prometheus.yml /out/prometheus.yml"]
+    restart: "no"
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3
+    restart: unless-stopped
+    depends_on:
+      config-render: {condition: service_completed_successfully}
+    command: ["/rendered/mediamtx.yml"]
+    volumes:
+      - rendered:/rendered:ro
+    ports:                       # PUBLIC: browser playback. RTSP ingest (8554) and API (9997) stay internal.
+      - "8889:8889"              # WebRTC (WHEP + player page)
+      - "8189:8189/udp"          # WebRTC media (ICE/UDP)
+      - "8189:8189/tcp"
+    networks: [backend, public]
+    # healthcheck: the image is scratch-based (no shell/curl); readiness is checked by the api (/api/v1/streams/gateway) and Prometheus.
+
+  # ------------------------------------------------------------------ control plane
+  api:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    image: vms-backend
+    restart: unless-stopped
+    environment: *backend-env
+    volumes: [./config:/app/config:ro]
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [backend, public]
+
+networks:
+  backend: {internal: false}   # Postgres/Kafka publish no host ports; set internal: true if workers never need outbound access
+  public: {}
+
+volumes:
+  pgdata:
+  kafkadata:
+  promdata:
+  grafanadata:
+  rendered:
