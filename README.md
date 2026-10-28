@@ -1,4 +1,4 @@
-# VMS — Distributed real-time AI video surveillance pipeline
+# Live Stream Detection — CCTV Streaming and AI Detection Backend
 
 RTSP cameras → FFmpeg decode (NVDEC when usable) → per-camera bounded frame router → **shared** batched model pool
 (YOLO / OCR / ReID / DINO / SAM adapters) → results → overlay + FFmpeg encode (NVENC when usable) → MediaMTX
