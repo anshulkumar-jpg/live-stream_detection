@@ -8,9 +8,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.core.security import ValidationError, validate_camera_id
 
 
+def _classes_schema(schema: dict) -> None:
+    """Show the model's class names as the allowed values (and a ready example) in Swagger/OpenAPI."""
+    try:
+        from app.core.config import get_settings, load_models_config
+
+        names = load_models_config(get_settings().models_config).class_names("default")
+    except Exception:  # docs only: never break startup over this
+        return
+    if not names:
+        return
+    for opt in schema.get("anyOf", []):
+        if opt.get("type") == "array":
+            opt["items"] = {"type": "string", "enum": names}
+    schema["examples"] = [names[:1], names[:3:2] if len(names) > 2 else names, names]
+    schema["description"] = (f"Classes to detect, any of {names}. Omit, null or [] = detect all. "
+                             "Same list: GET /api/v1/detection-classes")
+
+
 class CameraCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    camera_id: str
+    camera_id: str | None = None  # optional: generated from `name` when omitted
     name: str = Field(min_length=1, max_length=128)
     rtsp_url: str = Field(min_length=8, max_length=2048)
     model_profile: str = "default"
@@ -20,10 +38,13 @@ class CameraCreate(BaseModel):
     priority: int = Field(default=0, ge=0, le=10)  # >0 = critical camera, scheduled first
     transport: Literal["tcp", "udp"] = "tcp"
     autostart: bool = True
+    detection_classes: list[str] | None = Field(default=None, json_schema_extra=_classes_schema)  # omitted/null = all
 
     @field_validator("camera_id")
     @classmethod
-    def _id(cls, v: str) -> str:
+    def _id(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         try:
             return validate_camera_id(v)
         except ValidationError as e:
@@ -40,6 +61,7 @@ class CameraUpdate(BaseModel):
     target_fps: float | None = Field(default=None, gt=0, le=60)
     priority: int | None = Field(default=None, ge=0, le=10)
     transport: Literal["tcp", "udp"] | None = None
+    detection_classes: list[str] | None = Field(default=None, json_schema_extra=_classes_schema)  # [] or null = all
 
 
 class CameraOut(BaseModel):
@@ -58,6 +80,7 @@ class CameraOut(BaseModel):
     target_fps: float | None
     priority: int
     transport: str
+    detection_classes: list[str] | None = None  # null = all classes
     last_error: str | None = None
     last_heartbeat: datetime | None = None
     created_at: datetime

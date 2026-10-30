@@ -83,6 +83,28 @@ class UltralyticsDetector(Detector):
         return out
 
 
+class UltralyticsPoseDetector(UltralyticsDetector):
+    """YOLOv8-pose: person boxes with 17 COCO keypoints each."""
+
+    def detect(self, frames: list[np.ndarray]) -> list[list[RawDetection]]:
+        o = self.spec.options
+        half = bool(o.get("half", False)) and self.device.startswith("cuda")
+        res = self.model.predict(frames, conf=float(o.get("conf", 0.25)), iou=float(o.get("iou", 0.45)),
+                                 imgsz=int(o.get("imgsz", 640)), half=half, device=self.device, verbose=False)
+        out = []
+        for r in res:
+            b = r.boxes
+            if not len(b):
+                out.append([])
+                continue
+            xyxy, conf = b.xyxy.cpu().numpy(), b.conf.cpu().numpy()
+            kp = r.keypoints.data.cpu().numpy() if r.keypoints is not None else None
+            out.append([RawDetection(0, self.class_names.get(0, "person"), float(c), tuple(float(v) for v in bb),  # type: ignore[arg-type]
+                                     [[float(x), float(y), float(s)] for x, y, s in kp[i]] if kp is not None else None)
+                        for i, (bb, c) in enumerate(zip(xyxy, conf))])
+        return out
+
+
 class YoloV5Detector(Detector):
     """Legacy YOLOv5 checkpoints (ultralytics/yolov5 repo), loaded through the `yolov5` pip package."""
 
@@ -130,4 +152,5 @@ class YoloV5Detector(Detector):
 
 register("detection", "mock", lambda n, s, d: MockDetector(n, s, d))
 register("detection", "ultralytics", lambda n, s, d: UltralyticsDetector(n, s, d))
+register("detection", "ultralytics_pose", lambda n, s, d: UltralyticsPoseDetector(n, s, d))
 register("detection", "yolov5", lambda n, s, d: YoloV5Detector(n, s, d))

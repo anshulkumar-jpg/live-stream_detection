@@ -21,6 +21,7 @@ class CameraSpec(BaseModel):
     target_fps: float | None = None
     priority: int = 0
     transport: str = "tcp"
+    detection_classes: list[str] | None = None  # None = keep every detected class
 
     def __repr__(self) -> str:  # never leak credentials via repr/logging
         from app.core.security import redact_url

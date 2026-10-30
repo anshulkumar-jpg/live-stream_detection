@@ -78,6 +78,7 @@ class Camera(Base):
     target_fps: Mapped[float | None] = mapped_column(Float, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     transport: Mapped[str] = mapped_column(String(3), default="tcp")
+    detection_classes: Mapped[list | None] = mapped_column(JsonType, nullable=True)  # None = detect every class
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     heartbeat_detail: Mapped[dict] = mapped_column(JsonType, default=dict)

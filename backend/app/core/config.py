@@ -232,6 +232,12 @@ class ModelsConfig(BaseModel):
                     raise ValueError(f"profile '{pname}' references unknown model '{ref}'")
         return self
 
+    def class_names(self, profile: str) -> list[str] | None:
+        """Detection classes a user can pick for this profile (None = the model does not declare them)."""
+        p = self.profiles.get(profile)
+        names = self.models[p.detection].options.get("class_names") if p else None
+        return [str(n) for n in names] if names else None
+
 
 def load_models_config(path: str | None = None) -> ModelsConfig:
     return ModelsConfig.model_validate(_load_yaml(path or get_settings().models_config))

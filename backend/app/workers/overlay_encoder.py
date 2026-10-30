@@ -60,6 +60,20 @@ def _label_pill(img: np.ndarray, text: str, cx: int, bottom: int, col: tuple[int
     cv2.putText(img, text, (x1 + pad + r // 3, y2 - pad), font, scale, (255, 255, 255), th, cv2.LINE_AA)
 
 
+_SKELETON = [(15, 13), (13, 11), (16, 14), (14, 12), (11, 12), (5, 11), (6, 12), (5, 6), (5, 7), (6, 8), (7, 9), (8, 10),
+             (1, 2), (0, 1), (0, 2), (1, 3), (2, 4), (3, 5), (4, 6)]  # COCO 17-point body links
+
+
+def _draw_pose(img: np.ndarray, kps: list[list[float]], col: tuple[int, int, int], sx: float, sy: float) -> None:
+    pts = [(int(x * sx), int(y * sy), c) for x, y, c in kps]
+    for a, b in _SKELETON:
+        if a < len(pts) and b < len(pts) and pts[a][2] > 0.4 and pts[b][2] > 0.4:
+            cv2.line(img, pts[a][:2], pts[b][:2], col, 2, cv2.LINE_AA)
+    for x, y, c in pts:
+        if c > 0.4:
+            cv2.circle(img, (x, y), 3, (255, 255, 255), -1, cv2.LINE_AA)
+
+
 def draw_overlay(img: np.ndarray, result: FrameResult | None, cfg: OverlayCfg, camera_id: str,
                  ts: float, hold_ms: int | None = None, scale: tuple[float, float] = (1.0, 1.0)) -> np.ndarray:
     """Return an annotated COPY (the shared frame is never mutated). Handles result=None / empty detections."""
@@ -74,6 +88,8 @@ def draw_overlay(img: np.ndarray, result: FrameResult | None, cfg: OverlayCfg, c
                               int(d.bbox_xyxy[2] * sx), int(d.bbox_xyxy[3] * sy))
             col = _color(cfg, d.class_name, d.class_id)
             _rounded_rect(out, (x1, y1), (x2, y2), col, cfg.thickness, max(6, min(x2 - x1, y2 - y1) // 12))
+            if d.keypoints:
+                _draw_pose(out, d.keypoints, col, sx, sy)
             if cfg.draw_labels:
                 label = d.class_name.upper()
                 if cfg.draw_confidence:

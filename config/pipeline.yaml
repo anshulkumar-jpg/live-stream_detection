@@ -33,6 +33,7 @@ overlay:
     truck: [60, 60, 235]        # red
     bus: [90, 190, 40]          # green
     bicycle: [230, 200, 0]      # cyan
+    person: [0, 200, 80]        # green-teal
 encoder:
   codec: h264              # h264 | h265
   encoder: auto            # auto | nvenc | software

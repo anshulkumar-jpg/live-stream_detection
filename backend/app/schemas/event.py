@@ -37,6 +37,7 @@ class Detection(BaseModel):
     class_name: str
     confidence: float = Field(ge=0.0, le=1.0)
     bbox_xyxy: tuple[float, float, float, float]
+    keypoints: list[list[float]] | None = None  # pose: [[x, y, conf], ...] (COCO 17-point order)
     track_id: int | None = None
     ocr_text: str | None = None
     ocr_confidence: float | None = None

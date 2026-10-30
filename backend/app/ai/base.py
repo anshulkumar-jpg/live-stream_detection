@@ -24,6 +24,7 @@ class RawDetection:
     class_name: str
     confidence: float
     bbox: tuple[float, float, float, float]
+    keypoints: list[list[float]] | None = None  # pose models: [[x, y, conf], ...] per body point
 
 
 @dataclass(slots=True)

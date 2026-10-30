@@ -60,6 +60,18 @@ async def profiles(c: Container = Depends(get_container), _: User = Depends(curr
              "config": r.config} for r in rows]
 
 
+@router.get("/api/v1/detection-classes")
+async def detection_classes(model_profile: str = "default", c: Container = Depends(get_container),
+                            _: User = Depends(current_user)):
+    """Classes a user can choose from when adding/editing a camera (detection_classes field)."""
+    from app.core.config import load_models_config
+
+    names = load_models_config(c.s.models_config).class_names(model_profile)
+    if names is None:
+        raise HTTPException(404, f"profile '{model_profile}' does not declare its classes")
+    return {"model_profile": model_profile, "classes": names}
+
+
 @router.get("/api/v1/system/summary")
 async def system_summary(c: Container = Depends(get_container), _: User = Depends(current_user)):
     async with c.sf() as db:

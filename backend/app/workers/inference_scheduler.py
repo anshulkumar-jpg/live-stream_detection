@@ -26,9 +26,11 @@ MAX_SAM_BOXES = 8
 class InferenceScheduler:
     def __init__(self, worker_id: str, router: FrameRouter, models: ModelManager, processor: ResultProcessor,
                  cfg: InferenceCfg, profile_for: Callable[[str], tuple[str, ProfileSpec] | None],
-                 is_active: Callable[[str], bool], gpu_mem_fraction: Callable[[], float | None] = lambda: None):
+                 is_active: Callable[[str], bool], gpu_mem_fraction: Callable[[], float | None] = lambda: None,
+                 classes_for: Callable[[str], set[str] | None] = lambda _cid: None):
         self.worker_id, self.router, self.models, self.processor, self.cfg = worker_id, router, models, processor, cfg
         self.profile_for, self.is_active, self.gpu_mem_fraction = profile_for, is_active, gpu_mem_fraction
+        self.classes_for = classes_for  # per-camera class filter (lower-case names) or None = keep all
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="inference", daemon=True)
         self._frame_counts: dict[str, int] = defaultdict(int)
@@ -98,9 +100,12 @@ class InferenceScheduler:
         for (f, pname, prof), raw in zip(items, raws):
             if not self.is_active(f.camera_id):
                 continue
+            allowed = self.classes_for(f.camera_id)
+            if allowed:
+                raw = [r for r in raw if r.class_name.lower() in allowed]
             timings = {"detect": det_ms / len(items)}  # amortised per frame
             dets = [Detection(class_id=r.class_id, class_name=r.class_name, confidence=max(0.0, min(1.0, r.confidence)),
-                              bbox_xyxy=tuple(float(v) for v in r.bbox)) for r in raw]  # type: ignore[arg-type]
+                              bbox_xyxy=tuple(float(v) for v in r.bbox), keypoints=r.keypoints) for r in raw]  # type: ignore[arg-type]
             res = FrameResult(f.camera_id, f.worker_id, f.session_id, f.sequence_number, f.capture_ts, f.ingest_ts,
                               (f.data.shape[1], f.data.shape[0]), model_name, det.version, dets, det_ms / len(items),
                               timings)

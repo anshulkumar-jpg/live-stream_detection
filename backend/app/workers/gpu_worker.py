@@ -115,7 +115,7 @@ class GpuWorker:
         self.gpu = GpuMonitor(settings.gpu_id)
         self.processor = ResultProcessor(self.worker_id, self._publish, self.store)
         self.scheduler = InferenceScheduler(self.worker_id, self.router, self.models, self.processor, pipeline.inference,
-                                            self._profile_for, self._is_active, self.gpu.mem_fraction)
+                                            self._profile_for, self._is_active, self.gpu.mem_fraction, self._classes_for)
         self._stop = threading.Event()
         self._hb_thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -184,6 +184,11 @@ class GpuWorker:
     def _profile_for(self, camera_id: str):
         s = self.sessions.get(camera_id)
         return None if s is None else (s.profile_name, s.profile)
+
+    def _classes_for(self, camera_id: str) -> set[str] | None:
+        s = self.sessions.get(camera_id)
+        c = s.spec.detection_classes if s else None
+        return {x.lower() for x in c} if c else None
 
     def _is_active(self, camera_id: str) -> bool:
         return camera_id in self.sessions
@@ -399,7 +404,8 @@ def _cam(c: dict) -> dict:
     url = os.path.expandvars(c.get("source_url") or c.get("rtsp_url", ""))
     return {"camera_id": c["camera_id"], "source_url": url, "model_profile": c.get("model_profile", "default"),
             "stream_enabled": c.get("stream_enabled", True), "target_fps": c.get("target_fps"),
-            "priority": c.get("priority", 0), "transport": c.get("transport", "tcp")}
+            "priority": c.get("priority", 0), "transport": c.get("transport", "tcp"),
+            "detection_classes": c.get("detection_classes")}
 
 
 def main(argv: list[str] | None = None) -> int:

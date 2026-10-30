@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.config import Settings
+from app.core.config import Settings, load_models_config
 from app.core.security import SecretBox, ValidationError, redact_url, validate_source_url
 from app.db.models import Camera, ModelProfile, PipelineSession, now
 from app.db.repositories import CameraRepo, SessionRepo
@@ -40,7 +41,22 @@ class CameraManager:
         return CameraSpec(camera_id=cam.camera_id, source_url=self.box.decrypt(cam.rtsp_url_encrypted),
                           model_profile=cam.model_profile,
                           stream_enabled=cam.stream_enabled and self.s.stream_policy == "always",
-                          target_fps=cam.target_fps, priority=cam.priority, transport=cam.transport)
+                          target_fps=cam.target_fps, priority=cam.priority, transport=cam.transport,
+                          detection_classes=cam.detection_classes or None)
+
+    def _normalize_classes(self, profile: str, classes: list[str] | None) -> list[str] | None:
+        """Check the chosen classes against what the profile's model offers; returns canonical names (None = all)."""
+        if not classes:
+            return None
+        known = load_models_config(self.s.models_config).class_names(profile)
+        if known is None:
+            return list(dict.fromkeys(classes))
+        by_lower = {k.lower(): k for k in known}
+        bad = [c for c in classes if c.lower() not in by_lower]
+        if bad:
+            raise ValidationError(f"unknown detection class {bad}; available for profile '{profile}': {known}")
+        picked = list(dict.fromkeys(by_lower[c.lower()] for c in classes))
+        return None if len(picked) == len(known) else picked  # choosing everything == no filter
 
     def _validate_url(self, url: str) -> None:
         validate_source_url(url, self.s.camera_allowed_cidrs, self.s.allow_synthetic_sources)
@@ -57,17 +73,30 @@ class CameraManager:
             raise ValidationError(f"unknown or disabled model_profile '{profile}'")
 
     # ---- CRUD
+    @staticmethod
+    async def _generate_id(db, name: str) -> str:
+        """camera_id from the camera name: 'Office Floor' -> 'office_floor', then _2, _3... if taken."""
+        base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:48] or "camera"
+        cid, n = base, 1
+        while await CameraRepo(db).get(cid):
+            n += 1
+            cid = f"{base}_{n}"
+        return cid
+
     async def create(self, body: CameraCreate) -> Camera:
         self._validate_url(body.rtsp_url)
         async with self.sf() as db:
+            if body.camera_id is None:
+                body.camera_id = await self._generate_id(db, body.name)
             if await CameraRepo(db).get(body.camera_id):
                 raise ConflictError(f"camera '{body.camera_id}' already exists")
             await self._check_profile(db, body.model_profile)
+            classes = self._normalize_classes(body.model_profile, body.detection_classes)
             cam = Camera(camera_id=body.camera_id, name=body.name, rtsp_url_encrypted=self.box.encrypt(body.rtsp_url),
                          source_display=redact_url(body.rtsp_url), model_profile=body.model_profile,
                          enabled=body.enabled, desired_state="stopped", actual_state="stopped",
                          stream_enabled=body.stream_enabled, target_fps=body.target_fps, priority=body.priority,
-                         transport=body.transport)
+                         transport=body.transport, detection_classes=classes)
             db.add(cam)
             await db.commit()
         if body.autostart and body.enabled:
@@ -89,6 +118,10 @@ class CameraManager:
                 if "model_profile" in changes and changes["model_profile"] != cam.model_profile:
                     await self._check_profile(db, changes["model_profile"])
                     cam.model_profile, restart = changes["model_profile"], True
+                if "detection_classes" in changes or ("model_profile" in changes and cam.detection_classes):
+                    new = self._normalize_classes(cam.model_profile, changes.get("detection_classes", cam.detection_classes))
+                    if new != cam.detection_classes:
+                        cam.detection_classes, restart = new, True
                 for f in ("target_fps", "priority", "transport"):
                     if f in changes and changes[f] != getattr(cam, f):
                         setattr(cam, f, changes[f]), None
