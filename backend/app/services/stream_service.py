@@ -5,7 +5,7 @@ import asyncio
 import logging
 import time
 
-from app.core.config import Settings
+from app.core.config import Settings, load_pipeline_config
 from app.db.models import Camera
 from app.schemas.camera import StreamInfo
 from app.services.command_service import CommandService
@@ -36,8 +36,10 @@ class StreamService:
             self._leases[cam.camera_id] = time.monotonic() + self.s.viewer_lease_s
         if not cam.stream_enabled:
             note = "streaming disabled for this camera"
+        enc = load_pipeline_config(self.s.pipeline_config).encoder
         return StreamInfo(camera_id=cam.camera_id, path=cam.camera_id, ready=ready, publishing=bool(hb.get("stream_publishing")),
-                          webrtc_url=urls["webrtc"], note=note)
+                          webrtc_url=urls["webrtc"], qualities=enc.heights(),
+                          hls_master_url=f"/api/v1/streams/{cam.camera_id}/master.m3u8", note=note)
 
     async def expire_leases(self, camera_lookup) -> None:
         """Stop encoding for on-demand cameras whose viewer lease expired."""

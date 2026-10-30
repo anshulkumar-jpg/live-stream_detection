@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.security import ValidationError, decode_token
@@ -38,3 +38,11 @@ def require_admin(u: User = Depends(current_user)) -> User:
     if u.role != "admin":
         raise HTTPException(403, "admin role required")
     return u
+
+
+def user_bearer_or_query(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+                         token: str | None = Query(None), c: Container = Depends(get_container)) -> User:
+    """Like current_user, but also accepts ?token=<jwt> (video players cannot set headers)."""
+    if creds is None and token:
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    return current_user(request, creds, c)

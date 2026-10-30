@@ -27,8 +27,14 @@ webrtcLocalUDPAddress: :8189
 webrtcLocalTCPAddress: :8189
 webrtcAdditionalHosts: [${WEBRTC_ADDITIONAL_HOSTS}]
 
-# --- HLS disabled: video is served directly over WebRTC only
-hls: no
+# --- HLS: quality ladder (<camera>, <camera>~480p, ...). The API builds the master playlist for players.
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: "*"
+hlsVariant: mpegts
+hlsSegmentCount: 7
+hlsSegmentDuration: 2s
+hlsAlwaysRemux: yes
 
 paths:
   # one path per camera, created implicitly when a worker publishes to /<camera_id>

@@ -8,6 +8,7 @@ name: vms
 
 x-backend-env: &backend-env
   VMS_ENV: ${VMS_ENV:-dev}
+  VMS_AUTH_ENABLED: ${VMS_AUTH_ENABLED:-true}
   VMS_LOG_LEVEL: ${VMS_LOG_LEVEL:-INFO}
   VMS_DATABASE_URL: ${VMS_DATABASE_URL}
   VMS_FERNET_KEY: ${VMS_FERNET_KEY:?set VMS_FERNET_KEY in .env}
@@ -25,6 +26,7 @@ x-backend-env: &backend-env
   VMS_MEDIAMTX_API_USER: ${MTX_API_USER:-api}
   VMS_MEDIAMTX_API_PASS: ${MTX_API_PASS:?set MTX_API_PASS in .env}
   VMS_PUBLIC_WEBRTC_BASE: ${VMS_PUBLIC_WEBRTC_BASE:-http://localhost:8889}
+  VMS_PUBLIC_HLS_BASE: ${VMS_PUBLIC_HLS_BASE:-http://localhost:8888}
   VMS_STREAM_POLICY: ${VMS_STREAM_POLICY:-always}
   VMS_CAMERA_ALLOWED_CIDRS: ${VMS_CAMERA_ALLOWED_CIDRS:-[]}
   VMS_ALLOW_SYNTHETIC_SOURCES: ${VMS_ALLOW_SYNTHETIC_SOURCES:-false}
@@ -98,6 +100,7 @@ services:
       - rendered:/rendered:ro
     ports:                       # PUBLIC: browser playback. RTSP ingest (8554) and API (9997) stay internal.
       - "8889:8889"              # WebRTC (WHEP + player page)
+      - "8888:8888"              # HLS (quality ladder)
       - "8189:8189/udp"          # WebRTC media (ICE/UDP)
       - "8189:8189/tcp"
     networks: [backend, public]
@@ -121,6 +124,49 @@ services:
       retries: 10
       start_period: 20s
     networks: [backend, public]
+
+  # ------------------------------------------------------------------ workers
+  gpu-worker-0:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args: {WITH_GPU: "1", TORCH_INDEX: "https://download.pytorch.org/whl/cu128"}
+    image: vms-backend-gpu
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.gpu_worker"]
+    environment:
+      <<: *backend-env
+      VMS_WORKER_ID: gpu-worker-0
+      VMS_GPU_ID: "0"
+      VMS_REQUIRE_CUDA: "true"
+      YOLO_CONFIG_DIR: /tmp/Ultralytics
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    depends_on:
+      api: {condition: service_healthy}
+      mediamtx: {condition: service_started}
+    networks: [backend]
+
+  worker-dev-0:                  # CPU-only: mock models + synthetic sources (docker compose --profile dev up ...)
+    profiles: [dev]
+    image: vms-backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.gpu_worker"]
+    environment:
+      <<: *backend-env
+      VMS_WORKER_ID: worker-dev-0
+      VMS_REQUIRE_CUDA: "false"
+      VMS_FORCE_MOCK_MODELS: "true"
+      VMS_ALLOW_SYNTHETIC_SOURCES: "true"
+    volumes: [./config:/app/config:ro]
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [backend]
 
 networks:
   backend: {internal: false}   # Postgres/Kafka publish no host ports; set internal: true if workers never need outbound access

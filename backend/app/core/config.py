@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     mediamtx_api_pass: str = ""
     # public (browser-facing) base URLs; MUST match mediamtx.yml + compose port mapping
     public_webrtc_base: str = "http://localhost:8889"
+    public_hls_base: str = "http://localhost:8888"
 
     # --- control-plane policies
     worker_heartbeat_timeout_s: float = 15.0
@@ -147,6 +148,16 @@ class EncoderCfg(BaseModel):
     nvenc_preset: str = "p3"
     queue_size: int = 3
     max_restarts: int = 10
+    renditions: list[int] = [480, 360, 240, 144]  # extra output heights (HLS quality ladder); [] = single stream only
+
+    def rendition_bitrate(self, h: int) -> int:
+        return self.bitrate_kbps if h >= self.height else max(100, int(self.bitrate_kbps * (h / self.height) ** 1.5))
+
+    def rendition_width(self, h: int) -> int:
+        return int(round(self.width * h / self.height / 2)) * 2
+
+    def heights(self) -> list[int]:
+        return [self.height] + sorted({h for h in self.renditions if 0 < h < self.height}, reverse=True)
 
 
 class WorkerCfg(BaseModel):
@@ -179,7 +190,7 @@ def load_pipeline_config(path: str | None = None) -> PipelineConfig:
 # ------------------------------------------------------------------- models.yaml
 class ModelSpec(BaseModel):
     kind: Literal["detection", "ocr", "reid", "dino", "segmentation"]
-    backend: str = "mock"  # mock | ultralytics | easyocr | torchreid | hf_dino | sam3 ...
+    backend: str = "mock"  # mock | ultralytics | yolov5 | easyocr | torchreid | hf_dino | sam3 ...
     weights: str | None = None
     version: str = "unversioned"
     options: dict = Field(default_factory=dict)  # conf, iou, imgsz, half, classes, langs, ...

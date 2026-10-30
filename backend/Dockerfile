@@ -20,6 +20,10 @@ COPY requirements.txt requirements-gpu.txt ./
 RUN pip install -r requirements.txt \
     && if [ "$WITH_GPU" = "1" ]; then pip install torch torchvision --index-url "$TORCH_INDEX" && pip install -r requirements-gpu.txt; fi
 
+# YOLOv5 weights (legacy checkpoints) cannot be loaded by ultralytics>=8: the `yolov5` package is installed
+# without its pinned deps (they conflict with current torch/numpy) plus the few it imports at load time.
+RUN if [ "$WITH_GPU" = "1" ]; then pip install --no-deps yolov5==7.0.13     && pip install "huggingface_hub==0.19.4" thop pandas seaborn matplotlib scipy tqdm PyYAML requests Pillow psutil; fi
+
 COPY app ./app
 COPY alembic.ini ./
 RUN useradd -r -u 10001 vms && chown -R vms /app

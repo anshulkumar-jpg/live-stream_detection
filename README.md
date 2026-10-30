@@ -64,7 +64,7 @@ curl -s localhost:8000/api/v1/cameras -H 'content-type: application/json' \
 API docs: http://localhost:8000/docs · Grafana: http://localhost:3000 · Prometheus: http://127.0.0.1:9090
 
 ### 2b. Linux + NVIDIA GPU
-Put weights in `./models/` (`yolo_general.pt`, or edit `config/models.yaml`), then:
+Put weights in `./models/` (`best.pt`, or edit `config/models.yaml`), then:
 ```bash
 docker compose up --build     # GPU is the default: gpu-worker-0 pinned to host GPU 0, VMS_REQUIRE_CUDA=true
 docker compose exec gpu-worker-0 python /app/scripts/test_gpu.py     # CUDA visible inside the container?

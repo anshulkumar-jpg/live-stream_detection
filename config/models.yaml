@@ -1,12 +1,12 @@
 # Model registry + camera inference profiles.
 # Nothing is downloaded automatically. Mount weights into the worker container (see README).
 models:
-  yolo_general:
+  best:
     kind: detection
-    backend: ultralytics
-    weights: /models/yolo_general.pt
+    backend: yolov5          # best.pt is a legacy YOLOv5 checkpoint; use "ultralytics" for YOLOv8+ weights
+    weights: /models/best.pt
     version: "custom-1.0"
-    options: {conf: 0.25, iou: 0.45, imgsz: 640, half: true}
+    options: {conf: 0.45, iou: 0.7, imgsz: 640, half: true, classes: [0, 1, 2, 3, 4]}  # Car Motorcycle Truck Bus Bicycle (best.pt class ids)
   # --- development models (explicit mock backend; NOT real inference)
   mock_blob:
     kind: detection
@@ -25,7 +25,7 @@ models:
 
 profiles:
   default:
-    detection: yolo_general
+    detection: best
     stages: [detect]
     fps: 5
   # profile used by synthetic/mock development stack (VMS_FORCE_MOCK_MODELS=true maps ALL models to mock)

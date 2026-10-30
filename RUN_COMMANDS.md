@@ -17,7 +17,6 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 docker compose --env-file .env config > $null; if ($?) { "compose-ok" }   # checks the config
 
 New-Item -ItemType Directory -Force models | Out-Null
-curl.exe -L -o models\yolo_general.pt https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
 ```
 
 Set the key in `.env` without editing by hand:
@@ -162,7 +161,7 @@ Test-NetConnection 192.168.1.100 -Port 554                                  # ca
 | Symptom | Cause / fix |
 |---|---|
 | Camera `pending`, "no workers registered" | The worker is not running: `docker compose up -d gpu-worker-0` |
-| Worker exits: "weights file not found" | Put `yolo_general.pt` in `models\` |
+| Worker exits: "weights file not found" | Put `best.pt` in `models\` |
 | Worker: "no kernel image" (RTX 50-series) | Needs the cu128 PyTorch image: rebuild `gpu-worker-0` |
 | Camera `reconnecting`, "Connection timed out" | PC and NVR are on different networks, or the IP is wrong |
 | `404 Not Found` | Wrong RTSP path for the camera brand |

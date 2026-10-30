@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import cameras, events, health, streams, workers
+from app.api import cameras, events, health, streams, viewer, workers
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.messaging.kafka_producer import EventBus
@@ -60,7 +60,7 @@ def create_app(settings: Settings | None = None, bus: EventBus | None = None, cr
         log.exception("unhandled error")
         return JSONResponse({"error": {"code": 500, "message": "internal error"}}, status_code=500)
 
-    for r in (health.router, cameras.router, workers.router, events.router, streams.router):
+    for r in (health.router, cameras.router, workers.router, events.router, streams.router, viewer.router):
         app.include_router(r)
     return app
 

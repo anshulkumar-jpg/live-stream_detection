@@ -196,10 +196,42 @@ def choose_encoder(cfg: EncoderCfg, caps: Capabilities | None = None) -> EncodeP
                                        "-bufsize", f"{cfg.bitrate_kbps * 2}k", "-g", str(cfg.gop), "-bf", "0"])
 
 
+def _with_bitrate(args: list[str], kbps: int) -> list[str]:
+    out, i = list(args), 0
+    while i < len(out):
+        if out[i] == "-b:v" or out[i] == "-maxrate":
+            out[i + 1] = f"{kbps}k"
+        elif out[i] == "-bufsize":
+            out[i + 1] = f"{kbps * 2}k"
+        i += 1
+    return out
+
+
+def rendition_sink(sink: str, height: int) -> str:
+    """MediaMTX path of a lower-quality rendition: <camera_id>~<height>p (camera ids cannot contain '~')."""
+    return f"{sink}~{height}p"
+
+
 def build_encode_args(plan: EncodePlan, cfg: EncoderCfg, sink: str, rtsp_transport: str = "tcp") -> list[str]:
-    """Raw bgr24 on stdin -> encoded stream to `sink` (rtsp:// URL, or file path for tests)."""
+    """Raw bgr24 on stdin -> encoded stream to `sink` (rtsp:// URL, or file path for tests).
+
+    For rtsp sinks with cfg.renditions, the same process also publishes scaled copies to <sink>~<h>p
+    (software x264, GOP-aligned with the main stream so HLS players can switch quality cleanly)."""
     head = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
             "-s", f"{cfg.width}x{cfg.height}", "-r", str(cfg.fps), "-i", "-"]
+    heights = [h for h in cfg.heights()[1:]] if sink.startswith("rtsp://") else []
+    if heights:
+        rplan = choose_encoder(cfg.model_copy(update={"encoder": "software"}))
+        n = len(heights)
+        splits = "".join(f"[s{i}]" for i in range(n))
+        scales = ";".join(f"[s{i}]scale=-2:{h}[o{i}]" for i, h in enumerate(heights))
+        fc = f"[0:v]split={n + 1}[m]{splits};{scales}"
+        args = head + ["-filter_complex", fc, "-map", "[m]", *plan.codec_args, "-pix_fmt", "yuv420p",
+                       "-f", "rtsp", "-rtsp_transport", rtsp_transport, sink]
+        for i, h in enumerate(heights):
+            args += ["-map", f"[o{i}]", *_with_bitrate(rplan.codec_args, cfg.rendition_bitrate(h)), "-pix_fmt", "yuv420p",
+                     "-f", "rtsp", "-rtsp_transport", rtsp_transport, rendition_sink(sink, h)]
+        return args
     tail = ["-pix_fmt", "yuv420p"]
     if sink.startswith("rtsp://"):
         tail += ["-f", "rtsp", "-rtsp_transport", rtsp_transport, sink]

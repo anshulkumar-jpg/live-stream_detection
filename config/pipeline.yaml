@@ -27,26 +27,12 @@ overlay:
   draw_timestamp: true
   draw_confidence: true
   detection_hold_ms: 1500
-  class_colors:            # BGR
-    person: [0, 255, 0]
-    bicycle: [0, 255, 255]
-    car: [255, 128, 0]
-    motorcycle: [255, 255, 0]
-    bus: [255, 0, 255]
-    truck: [255, 0, 128]
-    traffic light: [0, 200, 255]
-    stop sign: [0, 0, 255]
-    backpack: [128, 0, 255]
-    handbag: [180, 105, 255]
-    suitcase: [0, 128, 255]
-    bottle: [200, 200, 0]
-    chair: [128, 128, 0]
-    laptop: [255, 200, 100]
-    cell phone: [100, 255, 200]
-    dog: [0, 165, 255]
-    cat: [147, 20, 255]
-    bird: [50, 205, 154]
-    horse: [42, 42, 165]
+  class_colors:            # BGR, matched case-insensitively (best.pt classes)
+    car: [230, 60, 160]         # purple
+    motorcycle: [0, 140, 255]   # orange
+    truck: [60, 60, 235]        # red
+    bus: [90, 190, 40]          # green
+    bicycle: [230, 200, 0]      # cyan
 encoder:
   codec: h264              # h264 | h265
   encoder: auto            # auto | nvenc | software
@@ -55,6 +41,7 @@ encoder:
   height: 720
   fps: 15
   bitrate_kbps: 2500
+  renditions: [480, 360, 240, 144]   # extra quality levels (HLS ladder); 720 is the main stream. [] disables
   gop: 30
   preset: veryfast
   nvenc_preset: p3

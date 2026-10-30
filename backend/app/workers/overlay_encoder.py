@@ -29,8 +29,35 @@ _PALETTE = [(0, 255, 0), (255, 128, 0), (0, 200, 255), (255, 0, 255), (0, 0, 255
 
 
 def _color(cfg: OverlayCfg, class_name: str, class_id: int) -> tuple[int, int, int]:
-    c = cfg.class_colors.get(class_name)
+    c = cfg.class_colors.get(class_name) or cfg.class_colors.get(class_name.lower())
     return tuple(int(v) for v in c) if c else _PALETTE[class_id % len(_PALETTE)]  # type: ignore[return-value]
+
+
+def _rounded_rect(img: np.ndarray, p1: tuple[int, int], p2: tuple[int, int], col: tuple[int, int, int],
+                  thickness: int, r: int) -> None:
+    (x1, y1), (x2, y2) = p1, p2
+    r = max(0, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
+    for a, b in (((x1 + r, y1), (x2 - r, y1)), ((x1 + r, y2), (x2 - r, y2)),
+                 ((x1, y1 + r), (x1, y2 - r)), ((x2, y1 + r), (x2, y2 - r))):
+        cv2.line(img, a, b, col, thickness, cv2.LINE_AA)
+    for c, ang in (((x1 + r, y1 + r), 180), ((x2 - r, y1 + r), 270), ((x2 - r, y2 - r), 0), ((x1 + r, y2 - r), 90)):
+        cv2.ellipse(img, c, (r, r), ang, 0, 90, col, thickness, cv2.LINE_AA)
+
+
+def _label_pill(img: np.ndarray, text: str, cx: int, bottom: int, col: tuple[int, int, int], scale: float) -> None:
+    """Filled rounded label centred on x=cx whose lower edge sits on `bottom` (top edge of the box)."""
+    font, th = cv2.FONT_HERSHEY_SIMPLEX, 1
+    (tw, h), _ = cv2.getTextSize(text, font, scale, th)
+    pad = max(4, int(h * 0.6))
+    ph = h + 2 * pad
+    x1 = max(0, min(cx - (tw + 2 * pad) // 2, img.shape[1] - tw - 2 * pad - 1))
+    y1 = max(0, bottom - ph)
+    x2, y2 = x1 + tw + 2 * pad, y1 + ph
+    r = ph // 2
+    cv2.rectangle(img, (x1 + r, y1), (x2 - r, y2), col, -1, cv2.LINE_AA)
+    cv2.circle(img, (x1 + r, y1 + r), r, col, -1, cv2.LINE_AA)
+    cv2.circle(img, (x2 - r, y1 + r), r, col, -1, cv2.LINE_AA)
+    cv2.putText(img, text, (x1 + pad + r // 3, y2 - pad), font, scale, (255, 255, 255), th, cv2.LINE_AA)
 
 
 def draw_overlay(img: np.ndarray, result: FrameResult | None, cfg: OverlayCfg, camera_id: str,
@@ -46,19 +73,16 @@ def draw_overlay(img: np.ndarray, result: FrameResult | None, cfg: OverlayCfg, c
             x1, y1, x2, y2 = (int(d.bbox_xyxy[0] * sx), int(d.bbox_xyxy[1] * sy),
                               int(d.bbox_xyxy[2] * sx), int(d.bbox_xyxy[3] * sy))
             col = _color(cfg, d.class_name, d.class_id)
-            cv2.rectangle(out, (x1, y1), (x2, y2), col, cfg.thickness)
+            _rounded_rect(out, (x1, y1), (x2, y2), col, cfg.thickness, max(6, min(x2 - x1, y2 - y1) // 12))
             if cfg.draw_labels:
-                label = d.class_name
+                label = d.class_name.upper()
                 if cfg.draw_confidence:
                     label += f" {d.confidence:.2f}"
                 if d.track_id is not None:
                     label += f" #{d.track_id}"
                 if d.ocr_text:
                     label += f" [{d.ocr_text}]"
-                (tw, th), bl = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                ty = max(th + 4, y1)
-                cv2.rectangle(out, (x1, ty - th - 4), (x1 + tw + 4, ty + bl - 2), col, -1)
-                cv2.putText(out, label, (x1 + 2, ty - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                _label_pill(out, label, (x1 + x2) // 2, max(y1, 24), col, max(0.4, out.shape[0] / 1500))
     if cfg.draw_timestamp:
         text = f"{camera_id}  {datetime.fromtimestamp(ts, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}Z"
         cv2.putText(out, text, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)

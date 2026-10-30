@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 
 import cv2
 import numpy as np
@@ -82,5 +83,51 @@ class UltralyticsDetector(Detector):
         return out
 
 
+class YoloV5Detector(Detector):
+    """Legacy YOLOv5 checkpoints (ultralytics/yolov5 repo), loaded through the `yolov5` pip package."""
+
+    def load(self) -> None:
+        w = self.spec.weights
+        if not w:
+            raise ModelUnavailable(f"model '{self.name}': 'weights' path is required for backend yolov5")
+        if not os.path.isfile(w):
+            raise ModelUnavailable(f"model '{self.name}': weights file not found at {w}.")
+        try:
+            import torch
+            import yolov5
+        except ImportError as e:
+            raise ModelUnavailable("yolov5 is not installed (see backend/Dockerfile, WITH_GPU=1)") from e
+        o = self.spec.options
+        orig = torch.load  # torch>=2.6 defaults weights_only=True, which rejects YOLOv5 pickles (trusted local file)
+        torch.load = lambda *a, **k: orig(*a, **{**k, "weights_only": False})
+        try:
+            self.model = yolov5.load(w, device=self.device)
+        finally:
+            torch.load = orig
+        self.model.conf = float(o.get("conf", 0.25))
+        self.model.iou = float(o.get("iou", 0.45))
+        self.model.classes = o.get("classes")
+        self.model.max_det = int(o.get("max_det", 300))
+        if bool(o.get("half", False)) and self.device.startswith("cuda"):
+            self.model.half()
+        self.class_names = {int(k): v for k, v in self.model.names.items()}
+        self.ready = True
+
+    def warmup(self) -> None:
+        size = int(self.spec.options.get("imgsz", 640))
+        self.detect([np.zeros((size, size, 3), np.uint8)])
+
+    def detect(self, frames: list[np.ndarray]) -> list[list[RawDetection]]:
+        size = int(self.spec.options.get("imgsz", 640))
+        with warnings.catch_warnings():  # yolov5 emits a torch.cuda.amp FutureWarning on every call
+            warnings.simplefilter("ignore", FutureWarning)
+            res = self.model([f[:, :, ::-1] for f in frames], size=size)  # AutoShape expects RGB; frames are BGR
+        return [[RawDetection(int(c), self.class_names.get(int(c), str(int(c))), float(s),
+                              (float(x1), float(y1), float(x2), float(y2)))
+                 for x1, y1, x2, y2, s, c in det.cpu().numpy()]
+                for det in res.xyxy]
+
+
 register("detection", "mock", lambda n, s, d: MockDetector(n, s, d))
 register("detection", "ultralytics", lambda n, s, d: UltralyticsDetector(n, s, d))
+register("detection", "yolov5", lambda n, s, d: YoloV5Detector(n, s, d))

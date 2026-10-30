@@ -81,4 +81,6 @@ class StreamInfo(BaseModel):
     ready: bool
     publishing: bool
     webrtc_url: str
+    hls_master_url: str | None = None
+    qualities: list[int] = []
     note: str | None = None
