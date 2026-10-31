@@ -13,7 +13,8 @@ from urllib.parse import urlsplit, urlunsplit
 from cryptography.fernet import Fernet, InvalidToken
 
 CAMERA_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-_USERINFO_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@")
+_USERINFO_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@")  # greedy: a password may itself contain "@"
+_TOKEN_QS_RE = re.compile(r"([?&]token=)[^&\s\"']+")
 ALLOWED_PUBLIC_SCHEMES = {"rtsp", "rtsps"}
 # Dev/test-only schemes. Enabled explicitly through Settings.allow_synthetic_sources.
 DEV_SCHEMES = {"synthetic"}
@@ -26,7 +27,7 @@ class ValidationError(ValueError):
 # --------------------------------------------------------------------- redaction
 def redact_text(text: str) -> str:
     """Strip user:password@ from any URL found in free text (logs, ffmpeg stderr)."""
-    return _USERINFO_RE.sub(r"\1***@", text)
+    return _TOKEN_QS_RE.sub(r"\1***", _USERINFO_RE.sub(r"\1***@", text))  # also hides ?token=<jwt> in access logs
 
 
 def redact_url(url: str) -> str:
@@ -153,3 +154,30 @@ class TokenBucketLimiter:
             if len(self._b) > 10000:  # bound memory
                 self._b = dict(list(self._b.items())[-5000:])
             return True
+
+
+class LoginThrottle:
+    """Brute-force guard: after `max_fail` failed logins for one (client, username) within `window_s`, further
+    attempts get 429 until the oldest failure ages out. In-memory, per API process."""
+
+    def __init__(self, max_fail: int = 5, window_s: float = 300.0):
+        self.max_fail, self.window_s = max_fail, window_s
+        self._fails: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def retry_after(self, key: str) -> int:
+        now = time.monotonic()
+        with self._lock:
+            fails = [t for t in self._fails.get(key, []) if now - t < self.window_s]
+            self._fails[key] = fails
+            return int(self.window_s - (now - fails[0])) + 1 if len(fails) >= self.max_fail else 0
+
+    def failed(self, key: str) -> None:
+        with self._lock:
+            self._fails.setdefault(key, []).append(time.monotonic())
+            if len(self._fails) > 10000:  # bound memory
+                self._fails = dict(list(self._fails.items())[-5000:])
+
+    def succeeded(self, key: str) -> None:
+        with self._lock:
+            self._fails.pop(key, None)

@@ -4,14 +4,16 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException  # base class: also covers router 404/405, not just fastapi's
 
 from app.api import cameras, events, health, streams, viewer, workers
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
+from app.core.body_limit import BodyLimitMiddleware
 from app.messaging.kafka_producer import EventBus
 from app.services.container import Container
 
@@ -34,6 +36,7 @@ def create_app(settings: Settings | None = None, bus: EventBus | None = None, cr
     app.state.container = container
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_methods=["*"], allow_headers=["*"],
                        allow_credentials=False)
+    app.add_middleware(BodyLimitMiddleware, max_bytes=s.max_body_bytes)  # added last = outermost: runs before parsing
 
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):

@@ -342,6 +342,8 @@ class GpuWorker:
         i, e = sess.ingest, sess.encoder
         st = i.state if i.state in ("starting", "connecting", "running", "reconnecting", "stopped", "error") else "error"
         stats = self.router.stats().get(sess.spec.camera_id, {})
+        if e and e.gave_up:  # publishing to MediaMTX failed for good (e.g. 401 publish password): surface it
+            st = "error"
         age = i.last_frame_age()
         return CameraHeartbeat(
             camera_id=sess.spec.camera_id, worker_id=self.worker_id, session_id=sess.session_id, state=st,  # type: ignore[arg-type]

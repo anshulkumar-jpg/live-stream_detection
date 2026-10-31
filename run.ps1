@@ -77,8 +77,9 @@ docker @compose ps
 Step "URLs"
 Write-Host "  API docs   http://localhost:8000/docs"
 Write-Host "  Viewer     http://localhost:8000/viewer/<camera_id>"
-Write-Host "  WebRTC     http://localhost:8889/<camera_id>/"
-Write-Host "  HLS        http://localhost:8888/<camera_id>/index.m3u8   (the bare :8888 root is 404 by design)"
+Write-Host "  WebRTC     http://localhost:8000/webrtc/<camera_id>   (signs you in, then opens the :8889 player)"
+Write-Host "  HLS        http://localhost:8000/hls/<camera_id>      (signs you in, then opens the :8888 player)"
+Write-Host "  VLC/HLS    http://localhost:8000/api/v1/streams/<camera_id>/master.m3u8?token=<token>"
 
 # 5. logs
 if ($NoLogs) { exit 0 }

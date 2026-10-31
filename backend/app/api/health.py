@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
@@ -18,12 +18,18 @@ class LoginIn(BaseModel):
 
 
 @router.post("/api/v1/auth/login")
-async def login(body: LoginIn, c: Container = Depends(get_container)):
+async def login(body: LoginIn, request: Request, c: Container = Depends(get_container)):
     from app.core.security import create_token
 
-    role = c.authenticate(body.username, body.password)
+    key = f"{request.client.host if request.client else 'unknown'}|{body.username.lower()}"
+    wait = c.login_throttle.retry_after(key)
+    if wait:
+        raise HTTPException(429, f"too many failed logins; try again in {wait}s", headers={"Retry-After": str(wait)})
+    role = await c.authenticate(body.username, body.password)
     if role is None:
+        c.login_throttle.failed(key)
         raise HTTPException(401, "invalid credentials")
+    c.login_throttle.succeeded(key)
     return {"access_token": create_token(body.username, role, c.s.jwt_secret), "token_type": "bearer", "role": role}
 
 

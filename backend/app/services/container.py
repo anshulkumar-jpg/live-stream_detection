@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings, load_models_config
-from app.core.security import SecretBox, TokenBucketLimiter, hash_password, verify_password
+from app.core.security import LoginThrottle, SecretBox, TokenBucketLimiter, hash_password, verify_password
 from app.db.models import Base, ModelProfile
 from app.db.session import make_engine, make_session_factory
 from app.messaging.kafka_producer import EventBus, ensure_topics, make_bus
@@ -51,10 +51,15 @@ class Container:
             if s.viewer_password:
                 self.users[s.viewer_username] = (hash_password(s.viewer_password), "viewer")
         self.last_loop_ok: float = 0.0
+        self._dummy_hash = hash_password("not-a-real-password") if s.auth_enabled else ""
+        self.login_throttle = LoginThrottle()
 
-    def authenticate(self, username: str, password: str) -> str | None:
+    async def authenticate(self, username: str, password: str) -> str | None:
+        """bcrypt runs in a worker thread (it would block the event loop); unknown users burn the same time as
+        wrong passwords, so response timing does not reveal which usernames exist."""
         u = self.users.get(username)
-        return u[1] if u and verify_password(password, u[0]) else None
+        ok = await asyncio.to_thread(verify_password, password, u[0] if u else self._dummy_hash)
+        return u[1] if u and ok else None
 
     async def seed_profiles(self) -> None:
         mc = load_models_config(self.s.models_config)

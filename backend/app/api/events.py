@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
@@ -18,6 +18,7 @@ router = APIRouter(tags=["events"])
 async def list_events(page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200), camera_id: str | None = None,
                       since: datetime | None = None, until: datetime | None = None, class_name: str | None = None,
                       c: Container = Depends(get_container), _: User = Depends(current_user)):
+    since, until = (d.replace(tzinfo=timezone.utc) if d and d.tzinfo is None else d for d in (since, until))  # naive = UTC
     async with c.sf() as db:
         rows, total = await EventRepo(db).page(page, page_size, camera_id, since, until, class_name)
     return EventPage(items=[EventOut.model_validate(r) for r in rows], total=total, page=page, page_size=page_size)

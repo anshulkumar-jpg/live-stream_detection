@@ -60,9 +60,15 @@ async def drain_worker(worker_id: str, c: Container = Depends(get_container), _:
         w = await WorkerRepo(db).get(worker_id)
         if w is None:
             raise HTTPException(404, f"worker '{worker_id}' not found")
+        previous = w.status
         w.status = "draining"  # stops admission immediately; worker confirms via heartbeat
         await db.commit()
     err = await c.commands.drain(worker_id)
     if err:
+        async with c.sf() as db:  # the worker never got the command: do not leave it stuck in 'draining'
+            w = await WorkerRepo(db).get(worker_id)
+            if w is not None and w.status == "draining":
+                w.status = previous
+                await db.commit()
         raise HTTPException(502, err)
     return {"worker_id": worker_id, "status": "draining", "note": "cameras are migrated by the rebalancer as capacity allows"}

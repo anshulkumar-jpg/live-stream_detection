@@ -1,18 +1,35 @@
 """HLS quality ladder: master playlist (adaptive bitrate) and a small browser viewer with a quality menu."""
 from __future__ import annotations
 
-from urllib.parse import urlsplit
+import ipaddress
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 
 from app.api.deps import User, get_container, user_bearer_or_query
 from app.core.config import load_pipeline_config
-from app.core.security import ValidationError, validate_camera_id
+from app.core.security import ValidationError, decode_token, validate_camera_id
 from app.db.repositories import CameraRepo
 from app.services.container import Container
 
 router = APIRouter(tags=["viewer"])
+
+
+def _gateway_host(request: Request, c: Container) -> str:
+    """Host for stream URLs: the one the client used, but only if it is trusted (configured host, localhost,
+    a private/loopback IP, or listed in VMS_TRUSTED_HOSTS). A spoofed Host header falls back to the configured one."""
+    configured = urlsplit(c.s.public_hls_base).hostname or "localhost"
+    host = request.url.hostname or configured
+    if host in {configured, "localhost", *c.s.trusted_hosts}:
+        return host
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback:
+            return host
+    except ValueError:
+        pass
+    return configured
 
 
 def rendition_path(camera_id: str, height: int, main_height: int) -> str:
@@ -31,9 +48,16 @@ async def master_playlist(camera_id: str, request: Request, token: str | None = 
         if await CameraRepo(db).get(camera_id) is None:
             raise HTTPException(404, f"camera '{camera_id}' not found")
     enc = load_pipeline_config(c.s.pipeline_config).encoder
-    pub = urlsplit(c.s.public_hls_base)  # same host the client used to reach the API, so LAN and localhost both work
-    base = f"{pub.scheme}://{request.url.hostname}:{pub.port or 8888}"
-    q = f"?token={token}" if token else ""
+    pub = urlsplit(c.s.public_hls_base)
+    host = _gateway_host(request, c)
+    base = f"{pub.scheme}://{f'[{host}]' if ':' in host else host}:{pub.port or 8888}"
+    q = ""
+    if token:  # only echo a token that is valid, URL-encoded (a raw value could inject playlist lines)
+        try:
+            decode_token(token, c.s.jwt_secret)
+            q = f"?token={quote(token, safe='')}"
+        except ValidationError:
+            q = ""
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
     for h in enc.heights():
         bw = int(enc.rendition_bitrate(h) * 1000 * 1.1)
@@ -41,6 +65,65 @@ async def master_playlist(camera_id: str, request: Request, token: str | None = 
         lines.append(f"{base}/{rendition_path(camera_id, h, enc.height)}/index.m3u8{q}")
     return Response("\n".join(lines) + "\n", media_type="application/vnd.apple.mpegurl",
                     headers={"Cache-Control": "no-store"})
+
+
+@router.get("/webrtc/{camera_id}", response_class=HTMLResponse, include_in_schema=False)
+async def webrtc(camera_id: str, c: Container = Depends(get_container)):
+    """Sign-in helper for the low-latency WebRTC player: gets a token, then opens it on the gateway with ?token=."""
+    try:
+        validate_camera_id(camera_id)
+    except ValidationError:
+        raise HTTPException(400, "invalid camera id")
+    return _gateway_page(c, camera_id, urlsplit(c.s.public_webrtc_base).port or 8889, "WebRTC")
+
+
+@router.get("/hls/{camera_id}", response_class=HTMLResponse, include_in_schema=False)
+async def hls(camera_id: str, c: Container = Depends(get_container)):
+    """Same sign-in helper for the gateway's own HLS page (port 8888)."""
+    try:
+        validate_camera_id(camera_id)
+    except ValidationError:
+        raise HTTPException(400, "invalid camera id")
+    return _gateway_page(c, camera_id, urlsplit(c.s.public_hls_base).port or 8888, "HLS")
+
+
+def _gateway_page(c: Container, camera_id: str, port: int, label: str) -> HTMLResponse:
+    return HTMLResponse(_WEBRTC_PAGE.replace("__CAMERA__", camera_id).replace("__PORT__", str(port))
+                        .replace("__LABEL__", label).replace("__AUTH__", "true" if c.s.auth_enabled else "false"))
+
+
+_WEBRTC_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__LABEL__ - __CAMERA__</title>
+<style>
+ [hidden]{display:none!important}
+ body{margin:0;background:#0d0f12;color:#e6e8eb;font:14px system-ui,sans-serif}
+ #login{max-width:280px;margin:80px auto;display:flex;flex-direction:column;gap:10px}
+ input,button{background:#222831;color:inherit;border:1px solid #333b47;border-radius:6px;padding:6px 10px;font:inherit}
+</style></head><body>
+<div id="login" hidden>
+ <b>Sign in to watch __CAMERA__ (__LABEL__)</b>
+ <input id="u" placeholder="username" autocomplete="username">
+ <input id="p" type="password" placeholder="password" autocomplete="current-password">
+ <button id="go">Sign in</button><span id="lerr"></span>
+</div>
+<script>
+const CAM="__CAMERA__",AUTH=__AUTH__;
+let token=new URLSearchParams(location.search).get("token");
+try{token=token||sessionStorage.getItem("vms_token")}catch(e){}
+function open_(){
+ const q=AUTH&&token?"?token="+encodeURIComponent(token):"";
+ location.replace(`${location.protocol}//${location.hostname}:__PORT__/${CAM}/${q}`);
+}
+if(token||!AUTH){open_()}else{
+ document.getElementById("login").hidden=false;
+ document.getElementById("go").onclick=async()=>{
+  const r=await fetch("/api/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({username:document.getElementById("u").value,password:document.getElementById("p").value})});
+  if(!r.ok){document.getElementById("lerr").textContent="Invalid credentials";return}
+  token=(await r.json()).access_token;try{sessionStorage.setItem("vms_token",token)}catch(e){}open_();};
+}
+</script></body></html>"""
 
 
 @router.get("/viewer/{camera_id}", response_class=HTMLResponse, include_in_schema=False)

@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     viewer_password: str = ""
     rate_limit_per_sec: float = 20.0
     rate_limit_burst: int = 60
+    max_body_bytes: int = 1_048_576  # requests with a larger body get 413 before any parsing
+    trusted_hosts: list[str] = []  # extra hostnames allowed in generated stream URLs (besides public_hls_base's host)
     cors_origins: list[str] = ["http://localhost:5173"]
     camera_allowed_cidrs: list[str] = []
     allow_synthetic_sources: bool = False

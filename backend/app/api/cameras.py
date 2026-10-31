@@ -85,6 +85,9 @@ async def camera_health(camera_id: str, c: Container = Depends(get_container), _
     age = (datetime.now(timezone.utc) - cam.last_heartbeat).total_seconds() if cam.last_heartbeat else None
     ok = cam.desired_state == "stopped" and cam.actual_state == "stopped" or (
         cam.actual_state == "running" and age is not None and age < c.s.worker_heartbeat_timeout_s)
+    if ok and cam.actual_state == "running" and cam.stream_enabled and c.s.stream_policy == "always" \
+            and (cam.heartbeat_detail or {}).get("stream_publishing") is False:
+        ok = False  # decoding but the live stream is not reaching MediaMTX: not healthy
     return CameraHealth(camera_id=cam.camera_id, desired_state=cam.desired_state, actual_state=cam.actual_state,
                         worker_id=cam.worker_id, last_heartbeat=cam.last_heartbeat,
                         heartbeat_age_s=None if age is None else round(age, 2), healthy=bool(ok),

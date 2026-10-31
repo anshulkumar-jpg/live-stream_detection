@@ -26,7 +26,17 @@ class RedactingJsonFormatter(logging.Formatter):
         return json.dumps(out)
 
 
+class _RedactAccessLog(logging.Filter):
+    """uvicorn access lines contain the full URL; hide ?token=<jwt> so logs cannot be replayed as sessions."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(redact_text(a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
 def setup_logging(level: str = "INFO") -> None:
+    logging.getLogger("uvicorn.access").addFilter(_RedactAccessLog())
     h = logging.StreamHandler(sys.stdout)
     h.setFormatter(RedactingJsonFormatter())
     root = logging.getLogger()

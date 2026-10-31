@@ -54,15 +54,26 @@ class EventRepo:
             (DetectionEventRow.camera_id == camera_id) if camera_id else None,
             (DetectionEventRow.timestamp >= since) if since else None,
             (DetectionEventRow.timestamp <= until) if until else None,
+            self._class_cond(class_name) if class_name else None,
         ):
             if cond is not None:
                 q, cq = q.where(cond), cq.where(cond)
         total = (await self.s.execute(cq)).scalar_one()
         rows = (await self.s.execute(q.order_by(DetectionEventRow.timestamp.desc())
                                      .offset((page - 1) * page_size).limit(page_size))).scalars().all()
-        if class_name:  # payload filter applied in Python for portability (page-local)
-            rows = [r for r in rows if any(d.get("class_name") == class_name for d in r.payload.get("detections", []))]
         return list(rows), total
+
+    def _class_cond(self, class_name: str):
+        """Filter in SQL (before count and paging): events having a detection of this class."""
+        import json
+
+        from sqlalchemy import String, cast, literal
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        if self.s.get_bind().dialect.name == "postgresql":
+            doc = {"detections": [{"class_name": class_name}]}  # a dict: the JSONB type serialises it (a str would become a JSON string)
+            return cast(DetectionEventRow.payload, JSONB).op("@>")(literal(doc, JSONB))
+        return cast(DetectionEventRow.payload, String).like(f'%"class_name": {json.dumps(class_name)}%')  # sqlite (tests)
 
     async def purge_older_than(self, days: int) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
